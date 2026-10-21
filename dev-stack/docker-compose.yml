@@ -1,0 +1,59 @@
+# Dev-stack lokal Titeny: backend-service + Postgres + seed (TTN-OPS-006). BUKAN untuk produksi.
+# Semua kredensial di bawah adalah nilai dev sekali-pakai; override lewat dev-stack/.env (diabaikan git).
+# Pemakaian: lihat dev-stack/README.md.
+name: titeny-dev
+
+services:
+  db:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: titeny
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-titeny_dev_lokal}
+      POSTGRES_DB: titeny
+    ports:
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U titeny -d titeny"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    # Default: cabang TTN-BE-005 di fork codingskuy (PR upstream titeny-backend-service #10).
+    # Ganti ke checkout lokal: BACKEND_CONTEXT=../../titeny-backend-service
+    build:
+      context: ${BACKEND_CONTEXT:-https://github.com/codingskuy/titeny-backend-service.git#feat/ttn-be-005-aksi-analis-audit}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://titeny:${DB_PASSWORD:-titeny_dev_lokal}@db:5432/titeny
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-lokal-minimal-32-karakter-xx}
+      OTP_LOG_DEV: "true"            # OTP dicetak ke log (kanal kirim produksi belum ada); HANYA dev
+      RATE_LIMIT_PER_MENIT: "100000" # longgar agar Schemathesis/smoke tidak kena 429
+      BIND_ADDR: 0.0.0.0:8080
+      RUST_LOG: info
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    restart: "no"
+
+  seed:
+    image: postgres:16.4
+    depends_on:
+      - backend
+    environment:
+      PGHOST: db
+      PGUSER: titeny
+      PGPASSWORD: ${DB_PASSWORD:-titeny_dev_lokal}
+      PGDATABASE: titeny
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-lokal-minimal-32-karakter-xx}
+    volumes:
+      - ./seed.sh:/seed/seed.sh:ro
+      - ./seed.sql:/seed/seed.sql:ro
+    entrypoint: ["sh", "/seed/seed.sh"]
+    restart: "no"
+
+volumes:
+  db-data:
