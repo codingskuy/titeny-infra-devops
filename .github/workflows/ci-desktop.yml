@@ -39,8 +39,12 @@ jobs:
           path: .infra
           sparse-checkout: scripts
       - run: sh .infra/scripts/qa-gate.sh . kotlin
-      - name: Wajib Gradle wrapper
-        run: test -f gradlew || { echo "::error::gradlew tidak ada di repo desktop; commit wrapper"; exit 1; }
+      - name: Wajib Gradle wrapper (gradlew + jar + properties ter-commit)
+        run: |
+          for f in gradlew gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties; do
+            test -f "$f" || { echo "::error::$f tidak ada di repo desktop; commit Gradle wrapper"; exit 1; }
+          done
+      - uses: gradle/actions/wrapper-validation@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -53,8 +57,30 @@ jobs:
             choco install wixtoolset --version=3.14.1 -y --no-progress
             "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           }
-      - name: Uji unit (wajib hijau)
-        run: ./gradlew --no-daemon test
+      # Hanya modul :analis-desktop. Modul :baca-mobile (stub Android+iOS, tidak dikirim di v1.0.0) TIDAK diuji di sini:
+      # `./gradlew test` di root akan ikut mengompilasi Android/iOS (butuh Android SDK; iOS tak bisa di Windows).
+      # Verifikasi lokal tanpa ANDROID_HOME: :analis-desktop:desktopTest tetap hijau (AGP 8.7 tidak menagih SDK saat konfigurasi).
+      - name: Uji desktop (unit + Pact konsumen + Compose UI; wajib hijau)
+        env:
+          E2E_TELEMETRY_DISABLED: '1'
+        run: ./gradlew --no-daemon :analis-desktop:desktopTest
+      - name: Berkas pact tidak berubah setelah uji (kontrak ter-commit sinkron)
+        run: |
+          if [ -d pacts ]; then
+            git diff --exit-code -- pacts/ || { echo "::error::pacts/ berubah setelah uji; jalankan ./gradlew :analis-desktop:desktopTest lalu commit"; exit 1; }
+          else
+            echo "::warning title=Pact konsumen::direktori pacts/ belum ada (menunggu titeny-app-kmp #18); dilewati"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: laporan-uji-desktop
+          path: |
+            analis-desktop/build/reports/tests/
+            analis-desktop/build/test-results/
+            pacts/
+          if-no-files-found: ignore
+          retention-days: 14
       - name: packageMsi
         run: ./gradlew --no-daemon :analis-desktop:packageMsi
       - name: Kumpulkan MSI + SHA256SUMS.txt
