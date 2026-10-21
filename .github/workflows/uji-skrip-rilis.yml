@@ -1,0 +1,16 @@
+# Uji skrip rilis/rollback desktop (TTN-OPS-005) pada tiap PR.
+name: uji-skrip-rilis
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  uji:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/tests/rilis-test.sh
+      - run: sh scripts/tests/qa-gate-test.sh
