@@ -1,0 +1,47 @@
+# CI web Bun + SvelteKit (TTN-OPS-002).
+name: ci-web
+on:
+  workflow_call:
+    inputs:
+      repository: { type: string, default: '' }
+      ref: { type: string, default: '' }
+    secrets:
+      CI_CHECKOUT_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      repository: { type: string, default: 'Coding-Skuy/titeny-web' }
+      ref: { type: string, default: 'main' }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-web-${{ inputs.repository || github.repository }}-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bun-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || github.ref }}
+          token: ${{ secrets.CI_CHECKOUT_TOKEN || github.token }}
+      - uses: actions/checkout@v4
+        with:
+          repository: Coding-Skuy/titeny-infra-devops
+          path: .infra
+          sparse-checkout: scripts
+      - run: sh .infra/scripts/qa-gate.sh . web
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.34
+      - name: bun install (lockfile beku)
+        run: bun install --frozen-lockfile
+      - name: Cek tipe (svelte-check)
+        run: bun run check
+      - name: bun test
+        run: bun test

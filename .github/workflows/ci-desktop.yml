@@ -1,0 +1,74 @@
+# CI desktop analis KMP -> MSI + SHA256SUMS.txt (TTN-OPS-002; rilis ada di release-desktop.yml, TTN-OPS-005).
+name: ci-desktop
+on:
+  workflow_call:
+    inputs:
+      repository: { type: string, default: '' }
+      ref: { type: string, default: '' }
+    secrets:
+      CI_CHECKOUT_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      repository: { type: string, default: 'Coding-Skuy/titeny-app-kmp' }
+      ref: { type: string, default: 'main' }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-desktop-${{ inputs.repository || github.repository }}-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packagemsi:
+    runs-on: windows-2022   # WiX 3.x dibutuhkan jpackage untuk MSI
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || github.ref }}
+          token: ${{ secrets.CI_CHECKOUT_TOKEN || github.token }}
+      - uses: actions/checkout@v4
+        with:
+          repository: Coding-Skuy/titeny-infra-devops
+          path: .infra
+          sparse-checkout: scripts
+      - run: sh .infra/scripts/qa-gate.sh . kotlin
+      - name: Wajib Gradle wrapper
+        run: test -f gradlew || { echo "::error::gradlew tidak ada di repo desktop; commit wrapper"; exit 1; }
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Pastikan WiX 3.14 tersedia
+        shell: pwsh
+        run: |
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            choco install wixtoolset --version=3.14.1 -y --no-progress
+            "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          }
+      - name: Uji unit (wajib hijau)
+        run: ./gradlew --no-daemon test
+      - name: packageMsi
+        run: ./gradlew --no-daemon :analis-desktop:packageMsi
+      - name: Kumpulkan MSI + SHA256SUMS.txt
+        run: |
+          set -eu
+          mkdir -p dist
+          msi=$(find analis-desktop/build -name '*.msi' -type f | /usr/bin/head -n1)
+          [ -n "$msi" ] || { echo "::error::MSI tidak dihasilkan"; exit 1; }
+          ver=$(basename "$msi" .msi | sed -E 's/.*-([0-9]+\.[0-9]+\.[0-9]+)$/\1/')
+          cp "$msi" "dist/Titeny-Analis-${ver}.msi"
+          (cd dist && sha256sum "Titeny-Analis-${ver}.msi" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: titeny-analis-msi
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30

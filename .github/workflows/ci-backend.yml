@@ -1,0 +1,74 @@
+# CI backend Rust (TTN-OPS-002). Reusable: dipanggil dari titeny-backend-service
+# (lihat ci-templates/) atau dari ci-semua.yml. Merah = merge/rilis diblokir (QA-002, QA-003).
+name: ci-backend
+on:
+  workflow_call:
+    inputs:
+      repository:
+        description: 'owner/repo yang diuji; kosong = repo pemanggil'
+        type: string
+        default: ''
+      ref:
+        type: string
+        default: ''
+    secrets:
+      CI_CHECKOUT_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      repository:
+        type: string
+        default: 'Coding-Skuy/titeny-backend-service'
+      ref:
+        type: string
+        default: 'main'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-backend-${{ inputs.repository || github.repository }}-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: titeny_ci
+          POSTGRES_PASSWORD: titeny_ci_lokal   # kredensial sekali-pakai untuk service CI, bukan rahasia produksi
+          POSTGRES_DB: titeny_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U titeny_ci -d titeny_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # #[sqlx::test] membuat DB uji sendiri per test; butuh hak CREATEDB (superuser service CI).
+      DATABASE_URL: postgres://titeny_ci:titeny_ci_lokal@localhost:5432/titeny_test
+      SQLX_OFFLINE: 'false'
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || github.ref }}
+          token: ${{ secrets.CI_CHECKOUT_TOKEN || github.token }}
+      - name: Gerbang QA-002 (tanpa test yang dilewati)
+        uses: actions/checkout@v4
+        with:
+          repository: Coding-Skuy/titeny-infra-devops
+          path: .infra
+          sparse-checkout: scripts
+      - run: sh .infra/scripts/qa-gate.sh . rust
+      - name: Wajib Cargo.lock (build terkunci)
+        run: |
+          test -f Cargo.lock || { echo "::error::Cargo.lock tidak ada, commit lockfile"; exit 1; }
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.83.0
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test (termasuk #[sqlx::test] idempotensi)
+        run: cargo test --locked --all-targets

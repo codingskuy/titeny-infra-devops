@@ -1,0 +1,32 @@
+# Orkestrasi manual/terjadwal: jalankan CI kelima repo kode terhadap main (QA gate lintas repo).
+# Tidak mengubah repo lain; hanya membaca. Pemicu per-PR ada di masing-masing repo (ci-templates/).
+name: ci-semua
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '0 20 * * *'   # 03.00 WIB (UTC+7)
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    uses: ./.github/workflows/ci-backend.yml
+    with: { repository: Coding-Skuy/titeny-backend-service, ref: main }
+    secrets: inherit
+  web:
+    uses: ./.github/workflows/ci-web.yml
+    with: { repository: Coding-Skuy/titeny-web, ref: main }
+    secrets: inherit
+  ai-models:
+    uses: ./.github/workflows/ci-model.yml
+    with: { repository: Coding-Skuy/titeny-ai-models, ref: main }
+    secrets: inherit
+  data-pipeline:
+    uses: ./.github/workflows/ci-model.yml
+    with: { repository: Coding-Skuy/titeny-data-pipeline, ref: main }
+    secrets: inherit
+  desktop:
+    uses: ./.github/workflows/ci-desktop.yml
+    with: { repository: Coding-Skuy/titeny-app-kmp, ref: main }
+    secrets: inherit

@@ -1,0 +1,12 @@
+# Salin ke .github/workflows/ci.yml di Coding-Skuy/titeny-backend-service (TTN-OPS-002).
+# Jadikan job "ci" sebagai required check main (usulan proteksi: lihat docs/ci.md; pengaturan repo dilakukan manusia).
+name: ci
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+jobs:
+  ci:
+    uses: Coding-Skuy/titeny-infra-devops/.github/workflows/ci-backend.yml@main
+    secrets: inherit

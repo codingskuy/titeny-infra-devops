@@ -1,0 +1,63 @@
+# CI Python: titeny-ai-models dan titeny-data-pipeline (TTN-OPS-002).
+# pytest dengan 11 fixture event terkunci (ASUMSI: berkas JSON di tests/fixtures/events/; ubah via input).
+name: ci-model
+on:
+  workflow_call:
+    inputs:
+      repository: { type: string, default: '' }
+      ref: { type: string, default: '' }
+      fixture_dir:
+        type: string
+        default: 'tests/fixtures/events'
+      jumlah_fixture:
+        type: number
+        default: 11
+    secrets:
+      CI_CHECKOUT_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      repository: { type: string, default: 'Coding-Skuy/titeny-ai-models' }
+      ref: { type: string, default: 'main' }
+      fixture_dir: { type: string, default: 'tests/fixtures/events' }
+      jumlah_fixture: { type: number, default: 11 }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-model-${{ inputs.repository || github.repository }}-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || github.ref }}
+          token: ${{ secrets.CI_CHECKOUT_TOKEN || github.token }}
+      - uses: actions/checkout@v4
+        with:
+          repository: Coding-Skuy/titeny-infra-devops
+          path: .infra
+          sparse-checkout: scripts
+      - run: sh .infra/scripts/qa-gate.sh . python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.7'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Pasang paket + pytest
+        run: |
+          python -m pip install --upgrade pip==24.3.1
+          python -m pip install -e . pytest==8.3.3
+      - name: Gerbang 11 fixture event
+        env:
+          FIXTURE_DIR: ${{ inputs.fixture_dir }}
+          EXPECTED: ${{ inputs.jumlah_fixture }}
+        run: sh .infra/scripts/qa-gate.sh . fixtures "$FIXTURE_DIR" "$EXPECTED"
+      - name: pytest
+        run: python -m pytest -ra --strict-markers
