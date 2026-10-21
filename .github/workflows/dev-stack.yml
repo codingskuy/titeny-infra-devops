@@ -1,0 +1,56 @@
+# Validasi dev-stack lokal (TTN-OPS-006). Smoke penuh bersama docker hanya manual.
+name: dev-stack
+on:
+  pull_request:
+    branches: [main]
+    paths: ['dev-stack/**', '.github/workflows/dev-stack.yml']
+  workflow_dispatch:
+    inputs:
+      backend_context:
+        description: 'Konteks build backend (git URL#cabang atau path); kosong = default compose'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  validasi:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose config
+        run: docker compose -f dev-stack/docker-compose.yml config -q
+      - name: shellcheck skrip dev-stack
+        run: |
+          shellcheck -s sh dev-stack/seed.sh
+          shellcheck -s bash dev-stack/smoke.sh
+
+  smoke:
+    if: github.event_name == 'workflow_dispatch'
+    needs: validasi
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      BACKEND_CONTEXT: ${{ inputs.backend_context }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Naikkan db + backend
+        working-directory: dev-stack
+        run: |
+          [ -n "$BACKEND_CONTEXT" ] || unset BACKEND_CONTEXT
+          docker compose up --build -d db backend
+      - name: Seed
+        working-directory: dev-stack
+        run: docker compose run --rm seed
+      - name: Smoke
+        run: dev-stack/smoke.sh
+      - name: Log backend bila gagal
+        if: failure()
+        working-directory: dev-stack
+        run: docker compose logs --no-color backend db | tail -n 200
+      - name: Bersihkan
+        if: always()
+        working-directory: dev-stack
+        run: docker compose down -v
