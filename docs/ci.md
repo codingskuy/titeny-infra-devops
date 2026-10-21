@@ -13,6 +13,19 @@ Rujukan: QA-001..QA-004 (`SRS/40-acceptance-criteria.md`), "Stack pengikat" (`FS
 
 `ci-semua.yml` (manual + 03.00 WIB) menjalankan kelimanya terhadap `main` masing-masing repo. Templat pemanggil per-PR ada di `ci-templates/`; salin ke `.github/workflows/ci.yml` repo kode (PR terpisah di repo itu, bukan di sini).
 
+## Uji kontrak: Pact dan Schemathesis (TTN-OPS-007)
+
+| Job | Di workflow | Pemicu | Sumber (nyata, PR siklus 2) | Memblokir merge |
+|---|---|---|---|---|
+| `pact-konsumen` | `ci-web.yml` | tiap run ci-web | `bun run test:pact`, `pacts/titeny-web-titeny-backend-service.json` (titeny-web #15); gagal bila `pacts/` berubah setelah uji | ya (bila `test:pact` ada; bila belum, peringatan + lewati) |
+| `pact-provider` | `ci-backend.yml` | tiap run ci-backend | mengambil `pacts/*.json` titeny-web (#15) dan titeny-app-kmp (#18, `pacts/titeny-analis-desktop-titeny-backend-service.json`) lalu menjalankan `scripts/verifikasi-pact.sh pacts-konsumen` di backend | ya setelah skrip ada |
+| `schemathesis` | `ci-backend.yml` | MANUAL: `workflow_dispatch` ci-backend atau ci-semua dengan `jalankan_schemathesis=true` | `contract/schemathesis.sh` titeny-web (#16/#17) terhadap `docs/api/openapi.yaml` backend, backend + Postgres + `dev-stack/seed.sql` | tidak |
+
+Input reusable: `kontrak_web_ref`, `kontrak_kmp_ref` (default `main`; isi nama cabang PR bila PR konsumen belum merge), `schemathesis_max_examples` (50).
+Tanggung jawab per sisi: konsumen menulis kontrak (pact) dan menjalankannya terhadap mock; provider memverifikasi (di backend); Schemathesis menguji properti spec vs implementasi.
+
+**Asumsi (belum ada di repo lain)**: PR backend #7-#10 TIDAK memuat `scripts/verifikasi-pact.sh` maupun state handler Pact (`given` pada kontrak web/kmp). Job `pact-provider` mendeteksi ketiadaannya dan menampilkan `::warning::` "BELUM dijalankan" (tidak lulus diam-diam). Kontrak skrip yang diharapkan: `sh scripts/verifikasi-pact.sh <direktori-pact>` memulai backend + DB (`DATABASE_URL` tersedia) dan keluar non-nol bila ada interaksi gagal. Maestro web (beta) dan alur desktop tetap dijalankan lokal/manual (lihat `docs/testing/` di repo konsumen).
+
 ## QA gate (`scripts/qa-gate.sh`)
 
 - QA-002: gagal bila ada `#[ignore]` (Rust), `test.skip/it.skip/xit/...` (web), `pytest.mark.skip/xfail` (Python), `@Ignore/@Disabled` (Kotlin) di berkas uji.
