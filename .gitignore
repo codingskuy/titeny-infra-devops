@@ -1,3 +1,13 @@
 .terraform/
 *.tfstate*
 .DS_Store
+
+# Rahasia (TTN-OPS-004): templat *.env.example boleh, nilai asli tidak
+.env
+.env.*
+!*.env.example
+*.pem
+*.key
+*.p12
+secrets/*.env
+!secrets/*.env.example
