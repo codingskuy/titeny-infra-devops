@@ -1,0 +1,139 @@
+# Rilis desktop analis Windows (TTN-OPS-005): Titeny-Analis-<versi>.msi + SHA256SUMS.txt -> GitHub Release repo ini.
+# Pemicu: tag `analis-vX.Y.Z` di repo ini, atau manual (publish=false = latihan tanpa rilis).
+# Bergantung pada ci-desktop.yml (TTN-OPS-002). Rilis lama TIDAK pernah dihapus (dasar rollback).
+name: release-desktop
+on:
+  push:
+    tags: ['analis-v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      versi:
+        description: 'Versi x.y.z (tanpa awalan)'
+        required: true
+        type: string
+      app_ref:
+        description: 'Ref titeny-app-kmp (kosong = v<versi>)'
+        required: false
+        type: string
+      publish:
+        description: 'Buat GitHub Release (tag analis-v<versi>)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
+jobs:
+  siapkan:
+    runs-on: ubuntu-24.04
+    outputs:
+      versi: ${{ steps.v.outputs.versi }}
+      app_ref: ${{ steps.v.outputs.app_ref }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - id: v
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          IN_VERSI: ${{ inputs.versi }}
+          IN_REF: ${{ inputs.app_ref }}
+          IN_PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -eu
+          if [ "$EVENT" = "push" ]; then versi=${REF_NAME#analis-v}; publish=true
+          else versi=$IN_VERSI; publish=$IN_PUBLISH; fi
+          echo "$versi" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::versi harus x.y.z"; exit 1; }
+          app_ref=${IN_REF:-v$versi}
+          {
+            echo "versi=$versi"
+            echo "app_ref=$app_ref"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: siapkan
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-desktop.yml
+    with:
+      repository: Coding-Skuy/titeny-app-kmp
+      ref: ${{ needs.siapkan.outputs.app_ref }}
+    secrets: inherit
+
+  verifikasi:
+    needs: [siapkan, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: titeny-analis-msi
+          path: dist
+      - name: Pasang msitools (cek arsitektur)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq msitools
+      - name: Verifikasi nama, checksum, x64
+        run: sh scripts/verifikasi-rilis-desktop.sh "${{ needs.siapkan.outputs.versi }}" dist
+
+  smoke-install:
+    needs: [siapkan, verifikasi]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: titeny-analis-msi
+          path: dist
+      - name: Pasang MSI senyap, cek terpasang dan proses hidup, lalu copot
+        shell: pwsh
+        env:
+          VERSI: ${{ needs.siapkan.outputs.versi }}
+        run: |
+          $msi = Join-Path $PWD "dist\Titeny-Analis-$env:VERSI.msi"
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 50; throw "msiexec install gagal: $($p.ExitCode)" }
+          $dir = 'C:\Program Files\id.skuy.titeny.analis'
+          $exe = Get-ChildItem $dir -Filter *.exe -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch 'unins|uninstall' } | Select-Object -First 1
+          if (-not $exe) { throw "aplikasi tidak terpasang di $dir" }
+          $proc = Start-Process $exe.FullName -PassThru
+          Start-Sleep -Seconds 15
+          if ($proc.HasExited) { throw "aplikasi berhenti dalam 15 detik (kode $($proc.ExitCode))" }
+          Stop-Process -Id $proc.Id -Force
+          $u = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /l*v uninstall.log" -Wait -PassThru
+          if ($u.ExitCode -ne 0) { throw "msiexec uninstall gagal: $($u.ExitCode)" }
+          "Smoke install lulus untuk $env:VERSI"
+
+  rilis:
+    needs: [siapkan, verifikasi, smoke-install]
+    if: needs.siapkan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: titeny-analis-msi
+          path: dist
+      - name: Buat GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSI: ${{ needs.siapkan.outputs.versi }}
+          APP_REF: ${{ needs.siapkan.outputs.app_ref }}
+        run: |
+          set -eu
+          tag="analis-v$VERSI"
+          sebelumnya=$(gh release list --limit 20 --json tagName --jq '[.[].tagName | select(startswith("analis-v"))][0] // ""')
+          {
+            echo "Rilis desktop analis Titeny $VERSI (Windows 10 21H2+ / Windows 11, 64-bit)."
+            echo
+            echo "- Sumber: Coding-Skuy/titeny-app-kmp @ $APP_REF"
+            echo "- Verifikasi: sha256sum -c SHA256SUMS.txt"
+            echo "- Rilis sebelumnya (rollback): ${sebelumnya:-tidak ada}"
+            echo "- Rollback: lihat docs/runbook-rilis-desktop.md"
+          } > notes.md
+          gh release create "$tag" dist/Titeny-Analis-"$VERSI".msi dist/SHA256SUMS.txt \
+            --title "Titeny Analis $VERSI" --notes-file notes.md --target "${{ github.sha }}"
