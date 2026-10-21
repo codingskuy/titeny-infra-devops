@@ -2,7 +2,12 @@
 # Tidak mengubah repo lain; hanya membaca. Pemicu per-PR ada di masing-masing repo (ci-templates/).
 name: ci-semua
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      jalankan_schemathesis:
+        description: 'Jalankan Schemathesis (backend + seed dev) selain CI biasa'
+        type: boolean
+        default: false
   schedule:
     - cron: '0 20 * * *'   # 03.00 WIB (UTC+7)
 
@@ -12,7 +17,10 @@ permissions:
 jobs:
   backend:
     uses: ./.github/workflows/ci-backend.yml
-    with: { repository: Coding-Skuy/titeny-backend-service, ref: main }
+    with:
+      repository: Coding-Skuy/titeny-backend-service
+      ref: main
+      jalankan_schemathesis: ${{ inputs.jalankan_schemathesis == true }}
     secrets: inherit
   web:
     uses: ./.github/workflows/ci-web.yml

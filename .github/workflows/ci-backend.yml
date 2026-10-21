@@ -11,6 +11,21 @@ on:
       ref:
         type: string
         default: ''
+      jalankan_schemathesis:
+        description: 'Jalankan Schemathesis terhadap openapi.yaml (manual; default mati)'
+        type: boolean
+        default: false
+      schemathesis_max_examples:
+        type: string
+        default: '50'
+      kontrak_web_ref:
+        description: 'Cabang/tag titeny-web: sumber contract/schemathesis.sh dan pacts/ konsumen web'
+        type: string
+        default: 'main'
+      kontrak_kmp_ref:
+        description: 'Cabang/tag titeny-app-kmp: sumber pacts/ konsumen desktop'
+        type: string
+        default: 'main'
     secrets:
       CI_CHECKOUT_TOKEN:
         required: false
@@ -20,6 +35,19 @@ on:
         type: string
         default: 'Coding-Skuy/titeny-backend-service'
       ref:
+        type: string
+        default: 'main'
+      jalankan_schemathesis:
+        description: 'Jalankan Schemathesis terhadap openapi.yaml (manual; default mati)'
+        type: boolean
+        default: false
+      schemathesis_max_examples:
+        type: string
+        default: '50'
+      kontrak_web_ref:
+        type: string
+        default: 'main'
+      kontrak_kmp_ref:
         type: string
         default: 'main'
 
@@ -72,3 +100,163 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: cargo test (termasuk #[sqlx::test] idempotensi)
         run: cargo test --locked --all-targets
+
+  # Verifikasi provider Pact: kontrak konsumen web + desktop (pacts/ di repo konsumen) diputar ulang terhadap backend.
+  # ASUMSI: repo backend menyediakan `scripts/verifikasi-pact.sh <direktori-pact>` (belum ada di PR #7-#10;
+  # tiket provider-verification di backend). Bila skrip belum ada, job lulus dengan peringatan eksplisit, BUKAN diam-diam.
+  pact-provider:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: titeny_ci
+          POSTGRES_PASSWORD: titeny_ci_lokal   # kredensial sekali-pakai untuk service CI
+          POSTGRES_DB: titeny_pact
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U titeny_ci -d titeny_pact"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://titeny_ci:titeny_ci_lokal@localhost:5432/titeny_pact
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || github.ref }}
+          token: ${{ secrets.CI_CHECKOUT_TOKEN || github.token }}
+      - name: Ambil kontrak konsumen web
+        uses: actions/checkout@v4
+        with:
+          repository: Coding-Skuy/titeny-web
+          ref: ${{ inputs.kontrak_web_ref || 'main' }}
+          path: .kontrak/web
+          sparse-checkout: pacts
+          token: ${{ secrets.CI_CHECKOUT_TOKEN || github.token }}
+      - name: Ambil kontrak konsumen desktop (app-kmp)
+        uses: actions/checkout@v4
+        with:
+          repository: Coding-Skuy/titeny-app-kmp
+          ref: ${{ inputs.kontrak_kmp_ref || 'main' }}
+          path: .kontrak/kmp
+          sparse-checkout: pacts
+          token: ${{ secrets.CI_CHECKOUT_TOKEN || github.token }}
+      - name: Kumpulkan berkas pact
+        id: pact
+        run: |
+          mkdir -p pacts-konsumen
+          for f in .kontrak/web/pacts/*.json .kontrak/kmp/pacts/*.json; do
+            if [ -f "$f" ]; then cp "$f" pacts-konsumen/; fi
+          done
+          n=$(find pacts-konsumen -name '*.json' | wc -l | tr -d ' ')
+          echo "jumlah=$n" >> "$GITHUB_OUTPUT"
+          ls -l pacts-konsumen
+          if [ "$n" -eq 0 ]; then
+            echo "::warning title=Pact::tidak ada berkas pact konsumen di ref yang dipilih (merge titeny-web #15 / titeny-app-kmp #18 atau isi kontrak_*_ref); verifikasi provider dilewati"
+          fi
+      - name: Cek skrip verifikasi provider (asumsi kontrak repo backend)
+        id: skrip
+        run: |
+          if [ -f scripts/verifikasi-pact.sh ]; then
+            echo "ada=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ada=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Pact provider::scripts/verifikasi-pact.sh belum ada di repo backend; verifikasi provider BELUM dijalankan (asumsi: dikirim agen backend)"
+          fi
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.pact.outputs.jumlah != '0' && steps.skrip.outputs.ada == 'true'
+        with:
+          toolchain: 1.83.0
+      - uses: Swatinem/rust-cache@v2
+        if: steps.pact.outputs.jumlah != '0' && steps.skrip.outputs.ada == 'true'
+      - name: Verifikasi provider (gagal bila kontrak konsumen dilanggar)
+        if: steps.pact.outputs.jumlah != '0' && steps.skrip.outputs.ada == 'true'
+        run: sh scripts/verifikasi-pact.sh pacts-konsumen
+
+  # Schemathesis: uji properti terhadap openapi.yaml dengan backend + Postgres + seed dev. HANYA manual
+  # (workflow_dispatch ci-backend / ci-semua dengan jalankan_schemathesis=true); tidak memblokir merge.
+  # ASUMSI: contract/schemathesis.sh milik titeny-web (PR #16/#17) tersedia di kontrak_web_ref.
+  schemathesis:
+    if: ${{ inputs.jalankan_schemathesis }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: titeny
+          POSTGRES_PASSWORD: titeny_ci_lokal   # kredensial sekali-pakai untuk service CI
+          POSTGRES_DB: titeny
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U titeny -d titeny"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SCHEMATHESIS_TELEMETRY: 'off'
+      E2E_TELEMETRY_DISABLED: '1'
+      DATABASE_URL: postgres://titeny:titeny_ci_lokal@localhost:5432/titeny
+      JWT_SECRET: rahasia-schemathesis-ci-minimal-32-karakter
+      OTP_LOG_DEV: 'true'
+      RATE_LIMIT_PER_MENIT: '100000'
+      BIND_ADDR: 127.0.0.1:8080
+      PGHOST: localhost
+      PGUSER: titeny
+      PGPASSWORD: titeny_ci_lokal
+      PGDATABASE: titeny
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || github.ref }}
+          token: ${{ secrets.CI_CHECKOUT_TOKEN || github.token }}
+      - name: Skrip seed dev (infra)
+        uses: actions/checkout@v4
+        with:
+          repository: Coding-Skuy/titeny-infra-devops
+          path: .infra
+          sparse-checkout: |
+            dev-stack
+            scripts
+      - name: Skrip Schemathesis (titeny-web)
+        uses: actions/checkout@v4
+        with:
+          repository: Coding-Skuy/titeny-web
+          ref: ${{ inputs.kontrak_web_ref || 'main' }}
+          path: .kontrak/web
+          sparse-checkout: contract
+          token: ${{ secrets.CI_CHECKOUT_TOKEN || github.token }}
+      - name: Wajib skrip kontrak web
+        run: |
+          test -f .kontrak/web/contract/schemathesis.sh || { echo "::error::contract/schemathesis.sh tidak ada di titeny-web@${{ inputs.kontrak_web_ref || 'main' }} (merge #16/#17 atau isi kontrak_web_ref)"; exit 1; }
+          test -f docs/api/openapi.yaml || { echo "::error::docs/api/openapi.yaml tidak ada di backend"; exit 1; }
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.83.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      - name: Bangun dan jalankan backend
+        run: |
+          cargo build --locked
+          ./target/debug/titeny-backend-service > "$RUNNER_TEMP/be.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8080/api/v1/kesehatan >/dev/null && exit 0; sleep 2; done
+          echo "::error::backend tidak sehat"; tail -n 50 "$RUNNER_TEMP/be.log"; exit 1
+      - name: Seed dev (dev-stack/seed.sql)
+        env:
+          MIGRASI_MIN: '4'
+        run: sh .infra/dev-stack/seed.sh
+      - name: Schemathesis
+        env:
+          SPEC: docs/api/openapi.yaml
+          BASE_URL: http://127.0.0.1:8080
+          SERVER_LOG: ${{ runner.temp }}/be.log
+          MAX_EXAMPLES: ${{ inputs.schemathesis_max_examples || '50' }}
+          REPORT_DIR: ${{ runner.temp }}/laporan-schemathesis
+        run: bash .kontrak/web/contract/schemathesis.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: laporan-schemathesis
+          path: ${{ runner.temp }}/laporan-schemathesis/
+          if-no-files-found: ignore
