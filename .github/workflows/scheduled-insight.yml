@@ -1,24 +1,20 @@
+# Dinonaktifkan sebagai penjadwal (TTN-OPS-003): jadwal terkunci v1.0.0 (WIB) dijalankan oleh
+# CronJob Kubernetes (k8s/cronjob-insight.yaml, timeZone Asia/Jakarta). Jadwal UTC lama
+# (0 1 * * * dan 15 * * * *) dihapus agar tidak ada job ganda. Workflow ini hanya pemicu manual darurat.
 name: scheduled-insight
 on:
-  schedule:
-    - cron: '0 1 * * *'
-    - cron: '15 * * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      jenis:
+        description: 'harga | demand | panen | mape'
+        required: true
+        type: choice
+        options: [harga, demand, panen, mape]
+permissions:
+  contents: read
 jobs:
-  insight-harian:
+  manual:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12.7' }
-      - name: Hitung prediksi
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          TITENY_API_TOKEN: ${{ secrets.TITENY_API_TOKEN }}
-        run: |
-          echo "Menjalankan insight harian Titeny (harga + panen)"
-  harga-per-jam:
-    runs-on: ubuntu-24.04
-    if: github.event.schedule == '15 * * * *'
-    steps:
-      - run: echo "Perbarui harga per jam dari lumbung.harga.perbarui"
+      - run: |
+          echo "Pemicu manual untuk job ${{ inputs.jenis }}: jalankan lewat 'kubectl create job --from=cronjob/<nama> -n titeny' (lihat docs/runbook-job-terjadwal.md)."
