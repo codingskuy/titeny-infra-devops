@@ -28,7 +28,8 @@ jobs:
     secrets: inherit
   ai-models:
     uses: ./.github/workflows/ci-model.yml
-    with: { repository: Coding-Skuy/titeny-ai-models, ref: main }
+    # ai-models tidak punya fixture event (fixture 11 event milik data-pipeline); gerbang jumlah = 0.
+    with: { repository: Coding-Skuy/titeny-ai-models, ref: main, jumlah_fixture: 0 }
     secrets: inherit
   data-pipeline:
     uses: ./.github/workflows/ci-model.yml
