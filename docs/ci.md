@@ -33,12 +33,24 @@ Tanggung jawab per sisi: konsumen menulis kontrak (pact) dan menjalankannya terh
 - Uji skrip: `sh scripts/tests/qa-gate-test.sh` (merah-hijau).
 - Lockfile wajib: `Cargo.lock`, `bun.lock*` (lewat `--frozen-lockfile`), `gradlew`. Tanpa itu CI merah dengan pesan jelas (build terkunci sesuai AGENTS).
 
-## Prasyarat di repo kode (temuan; di luar repo ini)
+## Prasyarat di repo kode (per repo; status per PR siklus 1-2, diperiksa 2026-10-22)
 
-1. `titeny-backend-service`: belum ada `Cargo.lock`, belum ada test; `Cargo.toml` memakai axum 0.7.9 sedangkan stack terkunci Axum 0.8.
-2. `titeny-web`: belum ada `bun.lock`, belum ada skrip/berkas test (`bun test` tanpa test keluar non-nol).
-3. `titeny-app-kmp`: belum ada `gradlew`/wrapper; `packageVersion = "0.1.0"` (rilis 1.0.0 butuh `1.0.0`); belum ada test.
-4. `titeny-ai-models`: ada `tests/test_harga.py`, belum ada fixture event; `pyproject.toml` tanpa pytest (CI memasang `pytest==8.3.3`).
+CI menolak build tanpa lockfile/wrapper (build terkunci, AGENTS). Prasyarat yang harus ter-commit di repo kode, dan statusnya pada cabang PR terbuka:
+
+| Repo | Prasyarat CI | Status |
+|---|---|---|
+| titeny-backend-service | `Cargo.lock`; Axum 0.8 (`Cargo.toml`); `tests/` yang memakai `#[sqlx::test]` (Postgres di job); `docs/api/openapi.yaml`; opsional `scripts/verifikasi-pact.sh` untuk `pact-provider` | `Cargo.lock`, Axum 0.8.4, `tests/` ada di PR #7-#10. `scripts/verifikasi-pact.sh` BELUM ada (asumsi). |
+| titeny-web | `bun.lock` (`bun install --frozen-lockfile`), skrip `check` dan `test` di `package.json`, minimal satu berkas `tests/*.test.ts`; `test:pact` + `pacts/` untuk `pact-konsumen` | `bun.lock`, `check`, `test`, `tests/` ada; `test:pact` + `pacts/` datang di #15. |
+| titeny-app-kmp | `gradlew`, `gradle/wrapper/gradle-wrapper.jar` + `.properties` (divalidasi `wrapper-validation`); `packageVersion = "1.0.0"`; modul `:analis-desktop` dengan `desktopTest`; `pacts/` untuk cek sinkron | wrapper + `packageVersion 1.0.0` di #12; `desktopTest` + `pacts/` di #18/#19. |
+| titeny-ai-models | `pyproject.toml` (paket dapat di-`pip install -e .`), `tests/test_*.py`; tidak punya fixture event | ada; `ci-semua` memakai `jumlah_fixture: 0`. |
+| titeny-data-pipeline | `pyproject.toml`, `tests/`, tepat 11 `tests/fixtures/events/*.json` | ada (11 fixture di PR #9; asumsi lokasi terkonfirmasi). |
+
+### Desktop: hanya `:analis-desktop:*`
+
+- `ci-desktop` menjalankan `./gradlew :analis-desktop:desktopTest` lalu `:analis-desktop:packageMsi`. `./gradlew test` di root TIDAK dipakai karena ikut menarik `:baca-mobile`.
+- Android SDK hanya diperlukan untuk modul `:baca-mobile` (`com.android.application`, `compileSdk 34`; target iOS tak dapat dibangun di Windows). Karena CI tidak menyentuh `:baca-mobile`, tidak ada langkah pemasangan Android SDK. Diverifikasi lokal: `env -u ANDROID_HOME ./gradlew --offline :analis-desktop:desktopTest` hijau (cabang `test/ttn-kmp-test-maestro`, 12 berkas hasil uji). Bila kelak `:baca-mobile` dibangun di CI, tambahkan job terpisah di ubuntu-24.04 dengan `android-actions/setup-android`.
+- Padanan Maestro untuk desktop: Maestro tidak mendukung Compose Desktop (ADR-0005 app-kmp); padanannya tes Compose UI `AlurUiTest` dalam `:analis-desktop:desktopTest` (sudah tercakup langkah di atas).
+- Prasyarat runner: Java 17 (Temurin), WiX 3.14 untuk MSI (dipasang bila tak ada), Windows karena `jpackage` MSI.
 
 ## Usulan proteksi `main` (tidak diterapkan; keputusan manusia)
 

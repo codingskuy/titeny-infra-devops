@@ -5,6 +5,7 @@ Format: satu seksi per rilis, terbaru di atas. Wajib diperbarui pada setiap comm
 ## [Belum dirilis]
 
 ### Ditambahkan
+- `ci-desktop`: hanya `:analis-desktop:desktopTest` (unit + Pact + Compose UI), validasi Gradle wrapper, cek sinkron `pacts/`, unggah laporan uji; `ci-semua`: ai-models `jumlah_fixture: 0`; `docs/ci.md` memuat prasyarat per repo kode (TTN-OPS-008).
 - CI uji kontrak: job `pact-konsumen` (ci-web), `pact-provider` dan `schemathesis` manual (ci-backend), input `jalankan_schemathesis` di ci-semua; dokumentasi di `docs/ci.md` (TTN-OPS-007).
 - Dev-stack lokal `dev-stack/`: docker-compose backend-service + Postgres 16.4 + seed, `smoke.sh` (healthcheck, login layanan/analis, PIN zona), README, workflow `dev-stack` (validasi per PR, smoke penuh manual) (TTN-OPS-006).
 - Rilis desktop analis: workflow `release-desktop` (build -> verifikasi -> smoke install -> GitHub Release), `scripts/verifikasi-rilis-desktop.sh`, `scripts/rollback-desktop.sh`, uji `scripts/tests/rilis-test.sh`, workflow `uji-skrip-rilis`, ADR-0004, `docs/runbook-rilis-desktop.md` (TTN-OPS-005).
